@@ -1,79 +1,86 @@
-Pi-Hole + Tailscale Network-Wide Ad Blocker
+#!/bin/bash
 
-A Raspberry Pi setup that blocks ads across your entire network using Pi-Hole and Tailscale.
+echo "================================================"
+echo "   Pi-Hole + Tailscale + Unbound + UFW Setup"
+echo "================================================"
+echo ""
 
-Hardware Required
-- Raspberry Pi Zero 2 W
-- Micro SD card
-- Power supply
+# Update system
+echo "[1/5] Updating system packages..."
+sudo apt update && sudo apt upgrade -y
+echo ""
 
-Step 1: Flash the SD Card
+# Install Pi-Hole
+echo "[2/5] Installing Pi-Hole..."
+echo "      The installer will ask you some questions:"
+echo "      - Confirm your static IP when prompted"
+echo "      - Choose Cloudflare as your DNS provider"
+echo "      - Choose Level 2 for privacy settings"
+echo ""
+curl -sSL https://install.pi-hole.net | bash
+echo ""
 
-1. Download and install Raspberry Pi Imager from raspberrypi.com/software onto your Mac or whatever device you are using
-2. Insert your Micro SD card into your device
-3. Open the Imager and select your device, Pi Zero 2 W
-4. Before writing, configure the following settings:
-   - Set a username and hostname, for example username@hostname.local
-   - Enable SSH
-   - Enter your WiFi SSID and password
-5. Write the image to the SD card
-6. Once finished, eject the SD card and insert it into your Pi
-7. Plug the Pi into a power supply
+# Install Tailscale
+echo "[3/5] Installing Tailscale..."
+curl -fsSL https://tailscale.com/install.sh | sh
+echo ""
 
-Step 2: Connect to Your Pi via SSH
+# Start Tailscale
+echo "      A link will appear — open it in your browser to authenticate."
+echo ""
+sudo tailscale up
+echo ""
 
-From your Mac terminal run:
+# Install and configure Unbound
+echo "[4/5] Installing and configuring Unbound..."
+sudo apt install unbound -y
 
-ssh username@hostname.local
+sudo tee /etc/unbound/unbound.conf.d/pi-hole.conf > /dev/null <<EOF
+server:
+    verbosity: 0
+    interface: 127.0.0.1
+    port: 5335
+    do-ip4: yes
+    do-udp: yes
+    do-tcp: yes
+    do-ip6: no
+    prefer-ip6: no
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    use-caps-for-id: no
+    edns-buffer-size: 1232
+    prefetch: yes
+    num-threads: 1
+    so-rcvbuf: 1m
+    private-address: 192.168.0.0/16
+    private-address: 169.254.0.0/16
+    private-address: 172.16.0.0/12
+    private-address: 10.0.0.0/8
+    private-address: fd00::/8
+    private-address: fe80::/10
+EOF
 
-When prompted type yes to confirm the connection. Enter your password and you should be connected.
+sudo service unbound restart
+echo ""
+echo "      Unbound installed. Remember to point Pi-Hole DNS to 127.0.0.1#5335"
+echo ""
 
-Step 3: Set a Static IP
+# Install and configure UFW
+echo "[5/5] Setting up UFW firewall..."
+sudo apt install ufw -y
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow ssh
+sudo ufw allow 53
+sudo ufw allow 80
+sudo ufw allow 443
+sudo ufw allow in on tailscale0
+sudo ufw enable
+echo ""
 
-Pi-Hole works best with a static IP so its address never changes on your network.
-
-1. Open your router settings via your router app or by navigating to your router IP in a browser. Common addresses are 192.168.1.1, 192.168.0.1, or 10.0.0.1
-2. Find the IP reservation or DHCP reservation setting
-3. Reserve a static IP for your Raspberry Pi
-4. Note this IP down, you will need it during Pi-Hole setup
-
-No port forwarding is needed. Tailscale handles remote access without it.
-
-Step 4: Run the Setup Script
-
-Once connected to your Pi via SSH run:
-
-chmod +x setup.sh
-./setup.sh
-
-The script will walk you through installing Pi-Hole and Tailscale in order. During the Pi-Hole installer you will be prompted to:
-- Confirm your static IP
-- Choose an upstream DNS provider, select Cloudflare or research other options like Google or OpenDNS
-- Choose a privacy level, select Level 2 - Hide domains and clients
-
-The script is intended for a fresh install. It is safe to rerun as Pi-Hole will just update if already installed.
-
-Step 5: Set Pi-Hole Web Interface Password
-
-At the end of the Pi-Hole installation the terminal will display a temporary password for the web interface. You can use this to log in or set your own with:
-
-sudo pihole setpassword
-
-Then access the web interface at:
-
-http://YOUR_PI_IP/admin
-
-Step 6: Authenticate Tailscale
-
-After Pi-Hole installs the script will run Tailscale and output an authentication link. Open it in your browser to authenticate. Once done your Pi will appear in your Tailscale dashboard.
-
-Step 7: Configure Tailscale DNS
-
-1. Open your Tailscale dashboard at https://login.tailscale.com/admin
-2. Copy the IP address of your Pi from the devices list
-3. Navigate to the DNS tab
-4. Under Nameservers click Add nameserver then Custom
-5. Paste your Pi Tailscale IP and save
-6. Enable Override DNS servers
-
-This routes all DNS traffic through your Pi-Hole when connected to Tailscale, giving you network-wide ad blocking from anywhere.
+echo "================================================"
+echo "   Setup complete!"
+echo "   Pi-Hole admin: http://YOUR_PI_IP/admin"
+echo "   Point Pi-Hole DNS to: 127.0.0.1#5335"
+echo "   Don't forget to configure DNS in Tailscale dashboard!"
+echo "================================================"
